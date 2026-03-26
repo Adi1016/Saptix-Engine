@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Saptix Engine - Sprite Editor</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1e1e1e; color: #fff; margin: 0; display: flex; height: 100vh; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+        
+        #sidebar { width: 320px; background: #252526; border-right: 1px solid #333; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        h2 { margin-top: 0; color: #007acc; font-size: 1.2rem; border-bottom: 2px solid #007acc; padding-bottom: 10px; }
+        h3 { margin-bottom: 5px; font-size: 1rem; color: #aaa; }
+        
+        label { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; margin-bottom: 5px; }
+        input[type="number"], input[type="text"] { background: #3c3c3c; border: 1px solid #555; color: white; padding: 5px; border-radius: 4px; width: 60px; text-align: center; }
+        input[type="text"] { width: 100px; text-align: left; }
+        
+        button { background: #0e639c; color: white; border: none; padding: 8px 12px; cursor: pointer; border-radius: 4px; font-weight: bold; width: 100%; transition: 0.2s; }
+        button:hover { background: #1177bb; }
+        
+        #animList { display: flex; flex-direction: column; gap: 10px; }
+        .anim-row { background: #333; padding: 10px; border-radius: 6px; border-left: 4px solid #007acc; }
+        .anim-row label { flex-direction: column; align-items: flex-start; gap: 4px; }
+        .anim-row div { display: flex; justify-content: space-between; margin-top: 10px; }
+        
+        .delete-btn { background: #c73a31; padding: 2px 6px; font-size: 0.7rem; width: auto; margin-top: 5px; float: right; }
+        .delete-btn:hover { background: #e04337; }
+        .export-btn { background: #28a745; font-size: 1.1rem; padding: 12px; margin-top: 20px; }
+        .export-btn:hover { background: #31bd50; }
+
+        #main { flex: 1; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #1a1a1a; overflow: hidden; }
+        #canvas-wrapper { overflow: auto; max-width: 100%; max-height: 100%; border: 2px dashed #444; border-radius: 8px; background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAHUlEQVQ4jWNgYGD4z0ABYBw1gGE0DBqGkWEAAAD//yO4DkEAAAAASUVORK5CYII='); } /* Checkerboard */
+        canvas { display: block; image-rendering: pixelated; }
+        
+        .upload-area { border: 2px dashed #007acc; text-align: center; padding: 20px; cursor: pointer; border-radius: 6px; color: #007acc; font-weight: bold; margin-bottom: 10px; transition: 0.2s; }
+        .upload-area:hover { background: rgba(0, 122, 204, 0.1); }
+        #fileInput { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2>Saptix Sprite Editor</h2>
+
+    <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+        📁 Click to Load Target PNG
+    </div>
+    <input type="file" id="fileInput" accept="image/png" />
+
+    <fieldset style="border: 1px solid #444; border-radius: 6px; padding: 10px; margin: 0;">
+        <legend style="color: #aaa; font-size: 0.9rem;">Grid Slicing</legend>
+        <label>Frame Width (px): <input type="number" id="frameW" value="64" min="1"></label>
+        <label>Frame Height (px): <input type="number" id="frameH" value="64" min="1"></label>
+    </fieldset>
+
+    <h3>Animation States</h3>
+    <div id="animList"></div>
+
+    <button onclick="addAnim()">➕ Add New State</button>
+    <button class="export-btn" onclick="exportAnim()">💾 Export to .sanim</button>
+</div>
+
+<div id="main">
+    <h3 id="placeholderText" style="color: #555; position: absolute;">Drag & Drop or Load a Sprite Sheet</h3>
+    <div id="canvas-wrapper">
+        <canvas id="canvas"></canvas>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const frameWInput = document.getElementById('frameW');
+    const frameHInput = document.getElementById('frameH');
+    const animList = document.getElementById('animList');
+    
+    let img = null;
+    let animCount = 0;
+
+    // Drawing Grid Logic
+    function redraw() {
+        if (!img) return;
+        document.getElementById('placeholderText').style.display = 'none';
+        
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+
+        let w = parseInt(frameWInput.value) || 64;
+        let h = parseInt(frameHInput.value) || 64;
+
+        if (w <= 0 || h <= 0) return;
+
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
+        ctx.lineWidth = 1;
+
+        // Draw Indices text properties
+        ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
+        ctx.font = '10px Arial';
+        ctx.textBaseline = 'top';
+
+        let frameIndex = 0;
+        for (let y = 0; y < canvas.height; y += h) {
+            for (let x = 0; x < canvas.width; x += w) {
+                ctx.strokeRect(x, y, w, h);
+                ctx.fillText(frameIndex, x + 2, y + 2);
+                frameIndex++;
+            }
+        }
+    }
+
+    // Input Events
+    frameWInput.addEventListener('input', redraw);
+    frameHInput.addEventListener('input', redraw);
+
+    // Image Load
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+        let reader = new FileReader();
+        reader.onload = function(event){
+            img = new Image();
+            img.onload = redraw;
+            img.src = event.target.result;
+        }
+        if(e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
+    });
+
+    // Add Animation State UI
+    function addAnim() {
+        let id = animCount++;
+        let div = document.createElement('div');
+        div.className = 'anim-row';
+        div.innerHTML = `
+            <div style="margin-top:0">
+                <input type="text" id="name_${id}" placeholder="e.g. Idle" value="Idle">
+                <button class="delete-btn" onclick="this.parentElement.parentElement.remove()">X</button>
+            </div>
+            <div>
+                <label>Start Frm<input type="number" id="start_${id}" value="0" min="0"></label>
+                <label>End Frm<input type="number" id="end_${id}" value="3" min="0"></label>
+                <label>Spd (s)<input type="number" id="spd_${id}" value="0.1" step="0.01"></label>
+            </div>
+        `;
+        animList.appendChild(div);
+    }
+
+    // Start with one default animation state
+    addAnim();
+
+    // Export Logic
+    function exportAnim() {
+        if (!img) { alert("Please load an image first!"); return; }
+
+        let text = "SAPTIX_ANIM_V1\n";
+        text += "sheet_width " + img.width + "\n";
+        text += "sheet_height " + img.height + "\n";
+        text += "frame_width " + (parseInt(frameWInput.value) || 64) + "\n";
+        text += "frame_height " + (parseInt(frameHInput.value) || 64) + "\n";
+        
+        let rows = animList.querySelectorAll('.anim-row');
+        text += "anim_count " + rows.length + "\n";
+
+        rows.forEach(row => {
+            let name = row.querySelector('input[type="text"]').value.trim() || "Unknown";
+            let start = row.querySelectorAll('input[type="number"]')[0].value;
+            let end = row.querySelectorAll('input[type="number"]')[1].value;
+            let speed = row.querySelectorAll('input[type="number"]')[2].value;
+            
+            // Format: anim [Name] [Start] [End] [Speed]
+            text += `anim ${name} ${start} ${end} ${speed}\n`;
+        });
+
+        // Trigger Download
+        let blob = new Blob([text], { type: "text/plain" });
+        let a = document.createElement("a");
+        let url = URL.createObjectURL(blob);
+        a.href = url;
+        a.download = "player.sanim";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+</script>
+</body>
+</html>

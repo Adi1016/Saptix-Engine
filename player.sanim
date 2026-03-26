@@ -1,0 +1,7 @@
+SAPTIX_ANIM_V1
+sheet_width 1024
+sheet_height 489
+frame_width 126
+frame_height 165
+anim_count 1
+anim Idle 0 7 0.1
