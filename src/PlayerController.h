@@ -1,7 +1,6 @@
 #pragma once
 #include "Component.h"
 #include "GameObject.h"
-#include "AnimatorComponent.h"
 #include <SDL3/SDL.h>
 #include <cmath>
 
@@ -21,26 +20,37 @@ public:
             owner->velocity.y = -800.0f; // Jump force
         }
 
-        // Horizontal movement
-        if (keyboard[SDL_SCANCODE_A]) owner->velocity.x -= accel * deltaTime;
-        if (keyboard[SDL_SCANCODE_D]) owner->velocity.x += accel * deltaTime;
-
-        // Animation States (The Engine's first brain layer!)
-        AnimatorComponent* anim = owner->GetComponent<AnimatorComponent>();
-        if (anim)
+        // Horizontal movement (Lerp / Friction)
+        float targetVelocityX = 0.0f;
+        float moveSpeed = 400.0f;
+        
+        if (keyboard[SDL_SCANCODE_A]) 
         {
-            if (!owner->isGrounded)
-            {
-                anim->Play("Jump");
-            }
-            else if (std::abs(owner->velocity.x) > 20.0f) // Threshold to prevent sliding pixel jitter
-            {
-                anim->Play("Run");
-            }
-            else
-            {
-                anim->Play("Idle");
-            }
+            targetVelocityX = -moveSpeed;
+            owner->flipHorizontal = true;
+        }
+        if (keyboard[SDL_SCANCODE_D]) 
+        {
+            targetVelocityX = moveSpeed;
+            owner->flipHorizontal = false;
+        }
+
+        // Apply Lerp for smooth acceleration and deceleration
+        float lerpFactor = 10.0f * deltaTime;
+        owner->velocity.x += (targetVelocityX - owner->velocity.x) * lerpFactor;
+
+        // Animation States (Direct State setting for row-based sheet)
+        if (!owner->isGrounded)
+        {
+            owner->state = AnimationState::Jump;
+        }
+        else if (std::abs(owner->velocity.x) > 20.0f) // Threshold to prevent sliding pixel jitter
+        {
+            owner->state = AnimationState::Walk;
+        }
+        else
+        {
+            owner->state = AnimationState::Idle;
         }
     }
 };

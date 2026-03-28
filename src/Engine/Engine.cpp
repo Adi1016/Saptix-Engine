@@ -1,8 +1,13 @@
 #include "Engine.h"
 #include "../PlayerController.h"
-#include "../AnimatorComponent.h"
 #include <SDL3_image/SDL_image.h>
 #include <iostream>
+
+// ImGui
+#include "imgui.h"
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_sdlrenderer3.h"
+#include "EditorUI.h"
 
 // INIT
 bool Engine::Init()
@@ -13,55 +18,90 @@ bool Engine::Init()
         return false;
     }
 
-    window = SDL_CreateWindow("Saptix Engine", 800, 600, SDL_WINDOW_RESIZABLE);
-
+    window = SDL_CreateWindow("Saptix Engine", 1280, 720, SDL_WINDOW_RESIZABLE);
     if (!window)
     {
         std::cout << "Window Creation Failed\n";
         return false;
     }
 
-    renderer = SDL_CreateRenderer(window, "software");
-
+    renderer = SDL_CreateRenderer(window, nullptr);
     if (!renderer)
     {
         std::cout << "Renderer Failed\n";
         return false;
     }
 
-    SDL_Texture* playerTexture = IMG_LoadTexture(renderer, "player.png");
+    // Create an offscreen render target for the game viewport
+    renderTarget = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                                     SDL_TEXTUREACCESS_TARGET, 1280, 720);
 
-    if (!playerTexture)
-    {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Texture Error", SDL_GetError(), window);
-    }
-        
+    // Setup Dear ImGui context
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    // Unity-style dark theme
+    ImGui::StyleColorsDark();
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding    = 4.0f;
+    style.FrameRounding     = 3.0f;
+    style.GrabRounding      = 3.0f;
+    style.TabRounding       = 3.0f;
+    style.FramePadding      = ImVec2(6, 4);
+    style.ItemSpacing       = ImVec2(8, 6);
+    style.Colors[ImGuiCol_WindowBg]        = ImVec4(0.12f, 0.12f, 0.14f, 1.00f);
+    style.Colors[ImGuiCol_TitleBg]         = ImVec4(0.08f, 0.08f, 0.09f, 1.00f);
+    style.Colors[ImGuiCol_TitleBgActive]   = ImVec4(0.16f, 0.29f, 0.48f, 1.00f);
+    style.Colors[ImGuiCol_Header]          = ImVec4(0.20f, 0.40f, 0.68f, 0.80f);
+    style.Colors[ImGuiCol_HeaderHovered]   = ImVec4(0.26f, 0.59f, 0.98f, 0.60f);
+    style.Colors[ImGuiCol_Button]          = ImVec4(0.20f, 0.40f, 0.68f, 0.80f);
+    style.Colors[ImGuiCol_ButtonHovered]   = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
+    style.Colors[ImGuiCol_FrameBg]         = ImVec4(0.20f, 0.20f, 0.22f, 1.00f);
+    style.Colors[ImGuiCol_Tab]             = ImVec4(0.14f, 0.14f, 0.16f, 1.00f);
+    style.Colors[ImGuiCol_TabHovered]      = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
+    style.Colors[ImGuiCol_TabSelected]     = ImVec4(0.16f, 0.29f, 0.48f, 1.00f);
+
+    ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
+    ImGui_ImplSDLRenderer3_Init(renderer);
+
+    editorUI = new EditorUI();
+
+    playerTexture = IMG_LoadTexture(renderer, "player.png");
+
     // Populate scene
-    scene.objects.push_back({ {100, 100}, {100, 100}, {50,   0} });
-    scene.objects.push_back({ {300, 200}, {150, 120}, {0,   40} });
-    scene.objects.push_back({ {500, 300}, {80,  80},  {-30, 20} });
-        
+    scene.objects.push_back({ "Player",       {100, 100}, {100, 100}, {0, 0} });
+    scene.objects.push_back({ "Block A",      {300, 200}, {150, 120}, {0, 0} });
+    scene.objects.push_back({ "Block B",      {500, 300}, {80,  80},  {0, 0} });
+
     for (int i = 0; i < 20; i++)
     {
         scene.objects.push_back({
+            "Tile " + std::to_string(i),
             { i * 120.0f, 400.0f },
             { 80, 80 },
             { 0, 0 }
         });
     }
 
-    // Attach Component AFTER generating all objects to prevent vector reallocations breaking pointers
+    // Attach PlayerController
     PlayerController* player = new PlayerController();
     player->owner = &scene.objects[0];
     scene.objects[0].components.push_back(player);
 
-    AnimatorComponent* animator = new AnimatorComponent();
-    animator->owner = &scene.objects[0];
-    animator->LoadAnimFile("player.sanim");
-    scene.objects[0].components.push_back(animator);
-
-    // Apply texture
+    // Apply texture only to player
     scene.objects[0].texture = playerTexture;
+
+    // Cache sprite sheet dimensions for the editor
+    if (playerTexture)
+    {
+        float w = 0, h = 0;
+        SDL_GetTextureSize(playerTexture, &w, &h);
+        playerTexW = (int)w;
+        playerTexH = (int)h;
+    }
 
     running = true;
     return true;
@@ -84,15 +124,29 @@ void Engine::Run()
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
+            ImGui_ImplSDL3_ProcessEvent(&event); // Forward to ImGui FIRST
+
             if (event.type == SDL_EVENT_QUIT)
                 running = false;
+
+            // Toggle Editor Mode with F5
+            if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F5)
+                editorMode = !editorMode;
         }
 
+        // Game physics ALWAYS runs — editor never pauses the game
         Update(deltaTime);
         Render();
 
         SDL_Delay(1);
     }
+
+    ImGui_ImplSDLRenderer3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
+    delete editorUI;
+    editorUI = nullptr;
+    SDL_DestroyTexture(renderTarget);
 }
 
 // UPDATE
@@ -100,25 +154,66 @@ void Engine::Update(float deltaTime)
 {
     SDL_PumpEvents();
 
-    // Camera -- follow player (center screen on objects[0])
+    // Camera follows player
     if (!scene.objects.empty())
     {
         camera.position.x = scene.objects[0].position.x - (scene.screenWidth  / 2.0f);
         camera.position.y = scene.objects[0].position.y - (scene.screenHeight / 2.0f);
     }
 
-    // Scene handles all physics
     scene.Update(deltaTime);
 }
 
 // RENDER
 void Engine::Render()
 {
+    // ── Step 1: Render game world into the offscreen texture ──────────────
+    SDL_SetRenderTarget(renderer, renderTarget);
     SDL_SetRenderDrawColor(renderer, 25, 25, 50, 255);
     SDL_RenderClear(renderer);
-
-    // Scene handles all rendering
     scene.Render(renderer, camera.position);
+
+    // If editor is open, draw a highlight rect around the selected object
+    if (editorMode && editorUI && editorUI->selectedObject)
+    {
+        GameObject* sel = editorUI->selectedObject;
+        SDL_FRect highlightRect = {
+            sel->position.x - camera.position.x - 3,
+            sel->position.y - camera.position.y - 3,
+            sel->size.x + 6,
+            sel->size.y + 6
+        };
+        SDL_SetRenderDrawColor(renderer, 80, 200, 255, 220);
+        SDL_RenderRect(renderer, &highlightRect);
+        // Second inner rect for glow effect
+        SDL_FRect innerRect = { highlightRect.x + 2, highlightRect.y + 2, highlightRect.w - 4, highlightRect.h - 4 };
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 120);
+        SDL_RenderRect(renderer, &innerRect);
+    }
+
+    SDL_SetRenderTarget(renderer, nullptr); // Back to screen
+
+    // ── Step 2: If editor is OFF, just blit the game fullscreen ───────────
+    if (!editorMode)
+    {
+        SDL_RenderTexture(renderer, renderTarget, nullptr, nullptr);
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    // ── Step 3: Editor mode — clear screen then render ImGui on top ───────
+    SDL_SetRenderDrawColor(renderer, 18, 18, 20, 255);
+    SDL_RenderClear(renderer);
+
+    ImGui_ImplSDLRenderer3_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+
+    if (editorUI)
+        editorUI->RenderUI(scene, renderer, renderTarget, playerTexture, playerTexW, playerTexH);
+        
+    ImGui::Render();
+    ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
 
     SDL_RenderPresent(renderer);
 }

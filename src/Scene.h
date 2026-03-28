@@ -17,10 +17,10 @@ public:
     int worldWidth   = 2000;
     int worldHeight  = 2000;
 
+    float gravity = 1500.0f; // Public so editor can tweak it live
+
     void Update(float deltaTime)
     {
-        float gravity = 1500.0f; // Snappy platformer gravity
-
         // Move all objects + resolve collisions using split-axis logic
         for (auto& obj : objects)
         {
@@ -28,15 +28,31 @@ public:
             obj.velocity.y += gravity * deltaTime;
             obj.Update(deltaTime); // components set velocity
 
-            // Animation (Frame cycling)
-            obj.animationTimer += deltaTime;
-            if (obj.animationTimer >= obj.animationSpeed)
+            // Animation States Configuration
+            const std::vector<SDL_FRect>* activeAnim = nullptr;
+            switch (obj.state)
             {
-                obj.currentFrame++;
-                obj.animationTimer = 0.0f;
+                case AnimationState::Idle: activeAnim = &obj.framesIdle; break;
+                case AnimationState::Walk: activeAnim = &obj.framesWalk; break;
+                case AnimationState::Jump: activeAnim = &obj.framesJump; break;
+            }
 
-                if (obj.currentFrame > obj.endFrame || obj.currentFrame < obj.startFrame)
-                    obj.currentFrame = obj.startFrame;
+            // Animation (Frame cycling)
+            if (activeAnim && !activeAnim->empty())
+            {
+                obj.animationTimer += deltaTime;
+                if (obj.animationTimer >= obj.animationSpeed)
+                {
+                    obj.currentFrame++;
+                    obj.animationTimer = 0.0f;
+
+                    if (obj.currentFrame >= activeAnim->size())
+                        obj.currentFrame = 0;
+                }
+            }
+            else
+            {
+                obj.currentFrame = 0;
             }
 
             // =========================
@@ -242,15 +258,28 @@ public:
 
             if (obj.texture)
             {
-                SDL_FRect srcRect =
+                const std::vector<SDL_FRect>* activeAnim = nullptr;
+                switch (obj.state)
                 {
-                    (float)(obj.currentFrame * obj.frameWidth),
-                    0.0f,
-                    (float)obj.frameWidth,
-                    (float)obj.frameHeight
-                };
+                    case AnimationState::Idle: activeAnim = &obj.framesIdle; break;
+                    case AnimationState::Walk: activeAnim = &obj.framesWalk; break;
+                    case AnimationState::Jump: activeAnim = &obj.framesJump; break;
+                }
+                SDL_FlipMode flip = obj.flipHorizontal ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
 
-                SDL_RenderTexture(renderer, obj.texture, &srcRect, &rect);
+                if (activeAnim && !activeAnim->empty())
+                {
+                    int fr = obj.currentFrame;
+                    if (fr < 0 || fr >= activeAnim->size()) fr = 0;
+                    
+                    SDL_FRect srcRect = (*activeAnim)[fr];
+                    SDL_RenderTextureRotated(renderer, obj.texture, &srcRect, &rect, 0.0, nullptr, flip);
+                }
+                else
+                {
+                    // Not sliced yet, draw the whole texture as fallback
+                    SDL_RenderTextureRotated(renderer, obj.texture, nullptr, &rect, 0.0, nullptr, flip);
+                }
             }
             else
             {
