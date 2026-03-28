@@ -1,14 +1,32 @@
 #include "Engine/Engine.h"
+#include "Engine/HubApp.h"
+#include <iostream>
+
+#pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
 
 int main()
 {
-    Engine engine;
+    HubApp hub;
+    if (hub.Init())
+    {
+        hub.Run();
+    }
+    hub.Shutdown();
 
-    if (!engine.Init())
-        return -1;
+    if (hub.DidSelectProject())
+    {
+        std::string targetProject = hub.GetSelectedProject();
 
-    engine.Run();
-    engine.Shutdown();
+        Engine engine;
+        if (!engine.Init(targetProject))
+        {
+            std::cout << "Engine failed to initialize with project: " << targetProject << "\n";
+            return -1;
+        }
+
+        engine.Run();
+        engine.Shutdown();
+    }
 
     return 0;
 }   

@@ -4,9 +4,8 @@
 #include "../Camera.h"
 
 enum class EngineState {
-    SplashScreen,
-    ProjectHub,
-    Editor
+    Editor,
+    PlayMode // Reserved for future use
 };
 
 // Forward declaration — full definition lives in EditorUI.h, included only by Engine.cpp
@@ -15,13 +14,13 @@ class EditorUI;
 class Engine
 {
 public:
-    bool Init();
+    bool Init(const std::string& projectConfigPath);
     void Run();
     void Shutdown();
 
     // Changed to public so EditorUI can read/write the state and paths directly from Engine* pointer if passed,
     // or we just keep them private and pass by reference to RenderUI/RenderHub
-    EngineState   state = EngineState::SplashScreen;
+    EngineState   state = EngineState::Editor;
     std::string   currentProjectPath = "";
     float         bootTimer = 0.0f;
 

@@ -8,9 +8,10 @@
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
 #include "EditorUI.h"
+#include "../Serializer.h"
 
 // INIT
-bool Engine::Init()
+bool Engine::Init(const std::string& projectConfigPath)
 {
     if (!SDL_Init(SDL_INIT_VIDEO))
     {
@@ -79,7 +80,13 @@ bool Engine::Init()
         playerTexH = (int)h;
     }
 
-    state = EngineState::SplashScreen;
+    currentProjectPath = projectConfigPath;
+    if (!currentProjectPath.empty()) {
+        Serializer::LoadScene(scene, currentProjectPath, playerTexture);
+    }
+    
+    state = EngineState::Editor;
+    editorMode = true;
     running = true;
     return true;
 }
@@ -146,54 +153,6 @@ void Engine::Update(float deltaTime)
 // RENDER
 void Engine::Render()
 {
-    if (state == EngineState::SplashScreen)
-    {
-        bootTimer += 1.0f / 60.0f; // Fake init delay
-        SDL_SetRenderDrawColor(renderer, 10, 10, 12, 255);
-        SDL_RenderClear(renderer);
-
-        ImGui_ImplSDLRenderer3_NewFrame();
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
-        
-        // Ensure the popups draw over everything
-        ImGui::SetNextWindowPos(ImVec2(1280/2.0f - 200, 720/2.0f - 100));
-        ImGui::SetNextWindowSize(ImVec2(400, 200));
-        ImGui::Begin("Splash", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground);
-        ImGui::SetWindowFontScale(3.0f);
-        ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "SAPTIX ENGINE");
-        ImGui::SetWindowFontScale(1.0f);
-        ImGui::Dummy(ImVec2(0, 40));
-        ImGui::TextDisabled("Initializing Core Subsystems...");
-        ImGui::ProgressBar(bootTimer / 5.0f, ImVec2(-1, 4));
-        ImGui::End();
-
-        ImGui::Render();
-        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
-        SDL_RenderPresent(renderer);
-
-        if (bootTimer > 5.0f) state = EngineState::ProjectHub;
-        return;
-    }
-
-    if (state == EngineState::ProjectHub)
-    {
-        SDL_SetRenderDrawColor(renderer, 20, 20, 22, 255);
-        SDL_RenderClear(renderer);
-
-        ImGui_ImplSDLRenderer3_NewFrame();
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
-
-        if (editorUI)
-            editorUI->RenderHub(this, scene, playerTexture); // Route to new Hub UI
-
-        ImGui::Render();
-        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
-        SDL_RenderPresent(renderer);
-        return;
-    }
-
     // ── Step 1: Render game world into the offscreen texture ──────────────
     SDL_SetRenderTarget(renderer, renderTarget);
     SDL_SetRenderDrawColor(renderer, 25, 25, 50, 255);
