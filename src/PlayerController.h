@@ -7,6 +7,8 @@
 class PlayerController : public Component
 {
 public:
+    std::string GetName() const override { return "PlayerController"; }
+
     void Update(float deltaTime) override
     {
         if (!owner) return;

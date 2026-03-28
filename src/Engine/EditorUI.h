@@ -5,14 +5,163 @@
 #include "imgui_impl_sdlrenderer3.h"
 #include "../Scene.h"
 #include "../Serializer.h"
+#include "Engine.h"
 #include <string>
 #include <vector>
 #include <algorithm>
+
+#include <direct.h>   // For _mkdir
+
+#define NOMINMAX
+#include <windows.h>  // For COM IFileDialog
+#include <shobjidl.h>
+
+#pragma comment(lib, "ole32.lib")
 
 class EditorUI
 {
 public:
     GameObject* selectedObject = nullptr;
+    
+public:
+    std::string OpenFolderBrowser()
+    {
+        std::string outPath = "";
+        IFileDialog* pfd = nullptr;
+        if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd))))
+        {
+            DWORD dwOptions;
+            if (SUCCEEDED(pfd->GetOptions(&dwOptions)))
+                pfd->SetOptions(dwOptions | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+
+            if (SUCCEEDED(pfd->Show(NULL))) // NULL hwnd makes it unparented
+            {
+                IShellItem* psi;
+                if (SUCCEEDED(pfd->GetResult(&psi)))
+                {
+                    PWSTR pszPath;
+                    if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath)))
+                    {
+                        std::wstring ws(pszPath);
+                        outPath = std::string(ws.begin(), ws.end());
+                        CoTaskMemFree(pszPath);
+                    }
+                    psi->Release();
+                }
+            }
+            pfd->Release();
+        }
+        return outPath;
+    }
+
+    void RenderHub(Engine* engine, Scene& scene, SDL_Texture* globalPlayerTex)
+    {
+        ImGuiViewport* vp = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(vp->WorkPos);
+        ImGui::SetNextWindowSize(vp->WorkSize);
+
+        ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
+        ImGui::Begin("Saptix Hub", nullptr, flags);
+
+        ImGui::Columns(2, "HubCols");
+        ImGui::SetColumnWidth(0, 250);
+
+        // LEFT PANEL (Mockup)
+        ImGui::Dummy(ImVec2(0, 40));
+        ImGui::SetWindowFontScale(1.5f);
+        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), " Saptix Hub");
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::Dummy(ImVec2(0, 40));
+
+        ImGui::Selectable(" Projects", true);
+        ImGui::Selectable(" Installs", false);
+        ImGui::Selectable(" Learn", false);
+        ImGui::Selectable(" Community", false);
+
+        ImGui::NextColumn();
+
+        // RIGHT PANEL
+        ImGui::Dummy(ImVec2(0, 40));
+        ImGui::SetWindowFontScale(1.2f);
+        ImGui::Text("Recent Projects");
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0, 5));
+        
+        if (ImGui::Button("+ New Project", ImVec2(150, 40)))
+        {
+            ImGui::OpenPopup("NewProjectPopup");
+        }
+
+        if (ImGui::BeginPopupModal("NewProjectPopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            static char projName[128] = "MyNewGame";
+            static char projPath[512] = "D:\\MY WORK"; // Default workspace
+            
+            ImGui::InputText("Project Name", projName, IM_ARRAYSIZE(projName));
+            ImGui::InputText("Location", projPath, IM_ARRAYSIZE(projPath));
+            ImGui::SameLine();
+            if (ImGui::Button("Browse..."))
+            {
+                std::string chosen = OpenFolderBrowser();
+                if (!chosen.empty())
+                {
+                    snprintf(projPath, sizeof(projPath), "%s", chosen.c_str());
+                }
+            }
+            
+            ImGui::Dummy(ImVec2(0, 10));
+            if (ImGui::Button("Create", ImVec2(120, 0)))
+            {
+                scene.objects.clear();
+                
+                // Formulate full directory path: D:\MY WORK\MyNewGame
+                std::string fullDirPath = std::string(projPath) + "\\" + std::string(projName);
+                
+                // Create the directory using windows direct.h
+                _mkdir(fullDirPath.c_str());
+
+                // Save initial scene file inside that newly created folder
+                engine->currentProjectPath = fullDirPath + "\\scene.saptix";
+                Serializer::SaveScene(scene, engine->currentProjectPath);
+                
+                engine->state = EngineState::Editor;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        ImGui::Dummy(ImVec2(0, 20));
+
+        std::vector<std::string> recents = Serializer::GetRecentProjects();
+        if (recents.empty())
+        {
+            ImGui::TextDisabled("No recent projects found. Build something awesome!");
+        }
+        else
+        {
+            for (const std::string& path : recents)
+            {
+                ImGui::PushID(path.c_str());
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.12f, 0.14f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.25f, 0.35f, 1.0f));
+                if (ImGui::Button(path.c_str(), ImVec2(-1, 50)))
+                {
+                    Serializer::LoadScene(scene, path, globalPlayerTex);
+                    engine->currentProjectPath = path;
+                    engine->state = EngineState::Editor;
+                }
+                ImGui::PopStyleColor(2);
+                ImGui::PopID();
+                ImGui::Dummy(ImVec2(0, 5));
+            }
+        }
+
+        ImGui::Columns(1);
+        ImGui::End();
+    }
     
 private:
     // Window toggles
@@ -37,11 +186,11 @@ private:
     int previewFrame = 0;
 
 public:
-    void RenderUI(Scene& scene, SDL_Renderer* renderer, SDL_Texture* gameViewportTex,
+    void RenderUI(Engine* engine, Scene& scene, SDL_Renderer* renderer, SDL_Texture* gameViewportTex,
                   SDL_Texture* spriteTex, int spriteW, int spriteH)
     {
         SetupDockspace();
-        DrawMainMenuBar(scene, spriteTex);
+        DrawMainMenuBar(engine, scene, spriteTex);
         DrawHierarchy(scene);
         DrawGameViewport(gameViewportTex);
         DrawProperties(scene);
@@ -77,15 +226,40 @@ private:
         ImGui::End();
     }
 
-    void DrawMainMenuBar(Scene& scene, SDL_Texture* spriteTex)
+    void DrawMainMenuBar(Engine* engine, Scene& scene, SDL_Texture* spriteTex)
     {
         if (ImGui::BeginMainMenuBar())
         {
             if (ImGui::BeginMenu("File"))
             {
-                if (ImGui::MenuItem("New Scene"))     scene.objects.clear();
-                if (ImGui::MenuItem("Save Scene"))    Serializer::SaveScene(scene, "myscene.saptix");
-                if (ImGui::MenuItem("Load Scene"))    Serializer::LoadScene(scene, "myscene.saptix", spriteTex);
+                if (ImGui::MenuItem("New Scene"))     
+                {
+                    scene.objects.clear();
+                }
+
+                bool hasPath = !engine->currentProjectPath.empty();
+                if (!hasPath) ImGui::BeginDisabled();
+                if (ImGui::MenuItem("Save Scene"))    
+                {
+                    Serializer::SaveScene(scene, engine->currentProjectPath);
+                }
+                if (!hasPath) ImGui::EndDisabled();
+
+                // Check if the current project's scene.saptix file actually exists on disk
+                bool fileExists = false;
+                if (hasPath) 
+                {
+                    std::ifstream f(engine->currentProjectPath);
+                    fileExists = f.good();
+                }
+
+                if (!fileExists) ImGui::BeginDisabled();
+                if (ImGui::MenuItem("Load Scene"))    
+                {
+                    Serializer::LoadScene(scene, engine->currentProjectPath, spriteTex);
+                }
+                if (!fileExists) ImGui::EndDisabled();
+
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("GameObject"))
@@ -162,7 +336,7 @@ private:
                     if (ImGui::IsMouseDoubleClicked(0))
                     {
                         renamingActive = true;
-                        strncpy_s(renameBuffer, obj.name.c_str(), sizeof(renameBuffer) - 1);
+                        snprintf(renameBuffer, sizeof(renameBuffer), "%s", obj.name.c_str());
                         ImGui::SetKeyboardFocusHere(-1);
                     }
                 }
@@ -173,7 +347,7 @@ private:
                     if (ImGui::MenuItem("Rename"))
                     {
                         renamingActive = true;
-                        strncpy_s(renameBuffer, obj.name.c_str(), sizeof(renameBuffer) - 1);
+                        snprintf(renameBuffer, sizeof(renameBuffer), "%s", obj.name.c_str());
                     }
                     if (ImGui::MenuItem("Duplicate"))
                     {
@@ -242,7 +416,7 @@ private:
         }
 
         char nameBuf[128];
-        strncpy_s(nameBuf, selectedObject->name.c_str(), sizeof(nameBuf) - 1);
+        snprintf(nameBuf, sizeof(nameBuf), "%s", selectedObject->name.c_str());
         ImGui::SetNextItemWidth(-1);
         if (ImGui::InputText("##name", nameBuf, sizeof(nameBuf)))
             selectedObject->name = nameBuf;
@@ -309,6 +483,75 @@ private:
             }
 
             ImGui::EndTabBar();
+        }
+
+        // Draw Attached Components Box
+        ImGui::Dummy(ImVec2(0, 15));
+        ImGui::Separator();
+        ImGui::TextDisabled("Attached Components");
+        
+        for (int i = 0; i < (int)selectedObject->components.size(); i++)
+        {
+            auto* comp = selectedObject->components[i];
+            ImGui::PushID(i);
+            
+            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.4f, 0.6f, 0.6f));
+            std::string label = "[Script] " + comp->GetName();
+            bool open = ImGui::CollapsingHeader(label.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+            ImGui::PopStyleColor();
+            
+            // Right Click to Remove Script
+            if (ImGui::BeginPopupContextItem("CompOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                {
+                    delete comp;
+                    selectedObject->components.erase(selectedObject->components.begin() + i);
+                    ImGui::EndPopup();
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::EndPopup();
+            }
+
+            if (open)
+            {
+                ImGui::Indent();
+                ImGui::TextDisabled("(No exposed properties yet)");
+                ImGui::Unindent();
+                ImGui::Dummy(ImVec2(0, 5));
+            }
+            ImGui::PopID();
+        }
+
+        ImGui::Dummy(ImVec2(0, 10));
+        
+        // Add new Components Dynamically via UI
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.5f, 0.25f, 1.0f));
+        if (ImGui::Button("+ Add Component", ImVec2(-1, 30)))
+        {
+            ImGui::OpenPopup("AddComponentPopup");
+        }
+        ImGui::PopStyleColor();
+
+        if (ImGui::BeginPopup("AddComponentPopup"))
+        {
+            ImGui::TextDisabled("Available Scripts");
+            ImGui::Separator();
+            if (ImGui::Selectable("PlayerController"))
+            {
+                // Verify we don't attach duplicate PlayerControllers
+                bool hasIt = false;
+                for (auto* c : selectedObject->components)
+                    if (c->GetName() == "PlayerController") hasIt = true;
+                
+                if (!hasIt) {
+                    PlayerController* pc = new PlayerController();
+                    pc->owner = selectedObject;
+                    selectedObject->components.push_back(pc);
+                }
+            }
+            ImGui::EndPopup();
         }
 
         ImGui::End();

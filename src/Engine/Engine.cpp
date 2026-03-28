@@ -71,30 +71,6 @@ bool Engine::Init()
 
     playerTexture = IMG_LoadTexture(renderer, "player.png");
 
-    // Populate scene
-    scene.objects.push_back({ "Player",       {100, 100}, {100, 100}, {0, 0} });
-    scene.objects.push_back({ "Block A",      {300, 200}, {150, 120}, {0, 0} });
-    scene.objects.push_back({ "Block B",      {500, 300}, {80,  80},  {0, 0} });
-
-    for (int i = 0; i < 20; i++)
-    {
-        scene.objects.push_back({
-            "Tile " + std::to_string(i),
-            { i * 120.0f, 400.0f },
-            { 80, 80 },
-            { 0, 0 }
-        });
-    }
-
-    // Attach PlayerController
-    PlayerController* player = new PlayerController();
-    player->owner = &scene.objects[0];
-    scene.objects[0].components.push_back(player);
-
-    // Apply texture only to player
-    scene.objects[0].texture = playerTexture;
-
-    // Cache sprite sheet dimensions for the editor
     if (playerTexture)
     {
         float w = 0, h = 0;
@@ -103,6 +79,7 @@ bool Engine::Init()
         playerTexH = (int)h;
     }
 
+    state = EngineState::SplashScreen;
     running = true;
     return true;
 }
@@ -129,8 +106,8 @@ void Engine::Run()
             if (event.type == SDL_EVENT_QUIT)
                 running = false;
 
-            // Toggle Editor Mode with F5
-            if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F5)
+            // Toggle Editor Mode with F5 (only in Editor State)
+            if (state == EngineState::Editor && event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F5)
                 editorMode = !editorMode;
         }
 
@@ -154,6 +131,8 @@ void Engine::Update(float deltaTime)
 {
     SDL_PumpEvents();
 
+    if (state != EngineState::Editor) return;
+
     // Camera follows player
     if (!scene.objects.empty())
     {
@@ -167,6 +146,54 @@ void Engine::Update(float deltaTime)
 // RENDER
 void Engine::Render()
 {
+    if (state == EngineState::SplashScreen)
+    {
+        bootTimer += 1.0f / 60.0f; // Fake init delay
+        SDL_SetRenderDrawColor(renderer, 10, 10, 12, 255);
+        SDL_RenderClear(renderer);
+
+        ImGui_ImplSDLRenderer3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        
+        // Ensure the popups draw over everything
+        ImGui::SetNextWindowPos(ImVec2(1280/2.0f - 200, 720/2.0f - 100));
+        ImGui::SetNextWindowSize(ImVec2(400, 200));
+        ImGui::Begin("Splash", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground);
+        ImGui::SetWindowFontScale(3.0f);
+        ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "SAPTIX ENGINE");
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::Dummy(ImVec2(0, 40));
+        ImGui::TextDisabled("Initializing Core Subsystems...");
+        ImGui::ProgressBar(bootTimer / 5.0f, ImVec2(-1, 4));
+        ImGui::End();
+
+        ImGui::Render();
+        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+        SDL_RenderPresent(renderer);
+
+        if (bootTimer > 5.0f) state = EngineState::ProjectHub;
+        return;
+    }
+
+    if (state == EngineState::ProjectHub)
+    {
+        SDL_SetRenderDrawColor(renderer, 20, 20, 22, 255);
+        SDL_RenderClear(renderer);
+
+        ImGui_ImplSDLRenderer3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+
+        if (editorUI)
+            editorUI->RenderHub(this, scene, playerTexture); // Route to new Hub UI
+
+        ImGui::Render();
+        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
     // ── Step 1: Render game world into the offscreen texture ──────────────
     SDL_SetRenderTarget(renderer, renderTarget);
     SDL_SetRenderDrawColor(renderer, 25, 25, 50, 255);
@@ -210,7 +237,7 @@ void Engine::Render()
     ImGui::NewFrame();
 
     if (editorUI)
-        editorUI->RenderUI(scene, renderer, renderTarget, playerTexture, playerTexW, playerTexH);
+        editorUI->RenderUI(this, scene, renderer, renderTarget, playerTexture, playerTexW, playerTexH);
         
     ImGui::Render();
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);

@@ -21,6 +21,15 @@ public:
 
     void Update(float deltaTime)
     {
+        // Vector reallocation safety map: Guarantee all components point to their true memory address every frame
+        for (auto& obj : objects)
+        {
+            for (auto* comp : obj.components)
+            {
+                comp->owner = &obj;
+            }
+        }
+
         // Move all objects + resolve collisions using split-axis logic
         for (auto& obj : objects)
         {

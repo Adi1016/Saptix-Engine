@@ -2,14 +2,47 @@
 #include <fstream>
 #include <string>
 #include <sstream>
+#include <vector>
+#include <algorithm>
 #include "Scene.h"
 #include "PlayerController.h"
 
 class Serializer
 {
 public:
+    static std::vector<std::string> GetRecentProjects()
+    {
+        std::vector<std::string> projects;
+        std::ifstream in("saptix_config.txt");
+        if (!in.is_open()) return projects;
+
+        std::string line;
+        while (std::getline(in, line))
+        {
+            if (!line.empty()) projects.push_back(line);
+        }
+        return projects;
+    }
+
+    static void AddRecentProject(const std::string& path)
+    {
+        std::vector<std::string> projects = GetRecentProjects();
+        // Remove if config already has it (so we can move to top)
+        projects.erase(std::remove(projects.begin(), projects.end(), path), projects.end());
+        // Insert at the front (most recent)
+        projects.insert(projects.begin(), path);
+
+        std::ofstream out("saptix_config.txt");
+        for (const std::string& p : projects)
+        {
+            out << p << "\n";
+        }
+    }
+
     static void SaveScene(const Scene& scene, const std::string& filepath)
     {
+        AddRecentProject(filepath); // Auto record history globally
+
         std::ofstream out(filepath);
         if (!out.is_open()) return;
 
@@ -36,6 +69,12 @@ public:
             WriteVec(obj.framesIdle);
             WriteVec(obj.framesWalk);
             WriteVec(obj.framesJump);
+
+            out << obj.components.size() << "\n";
+            for (auto* comp : obj.components)
+            {
+                out << comp->GetName() << "\n";
+            }
         }
     }
 
@@ -48,6 +87,7 @@ public:
 
         size_t objCount = 0;
         in >> objCount;
+        scene.objects.reserve(objCount + 100); // Reserve extra to avoid reallocation padding during active editing
 
         for (size_t i = 0; i < objCount; i++)
         {
@@ -86,17 +126,33 @@ public:
             ReadVec(obj.framesWalk);
             ReadVec(obj.framesJump);
 
-            // Re-attach core components based on name heuristics (simple Component Factory)
-            if (obj.name == "Player")
+            scene.objects.push_back(obj);
+
+            // Re-attach core components dynamically (with legacy support rollback)
+            auto pos = in.tellg();
+            std::string peekToken;
+            if (in >> peekToken)
             {
-                PlayerController* player = new PlayerController();
-                scene.objects.push_back(obj); // push first to get stable address
-                player->owner = &scene.objects.back();
-                scene.objects.back().components.push_back(player);
-            }
-            else
-            {
-                scene.objects.push_back(obj);
+                if (peekToken == "[OBJECT]")
+                {
+                    in.seekg(pos); // Rollback, this is a legacy object with no components
+                }
+                else
+                {
+                    size_t compCount = 0;
+                    try { compCount = std::stoull(peekToken); } catch(...) {}
+                    for (size_t c = 0; c < compCount; c++)
+                    {
+                        std::string compName;
+                        in >> std::ws >> compName;
+                        if (compName == "PlayerController")
+                        {
+                            PlayerController* player = new PlayerController();
+                            player->owner = &scene.objects.back();
+                            scene.objects.back().components.push_back(player);
+                        }
+                    }
+                }
             }
         }
     }
