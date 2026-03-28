@@ -71,6 +71,18 @@ bool Engine::Init(const std::string& projectConfigPath)
     editorUI = new EditorUI();
 
     playerTexture = IMG_LoadTexture(renderer, "player.png");
+    logoTexture = IMG_LoadTexture(renderer, "logo.png");
+
+    if (logoTexture)
+    {
+        // Set window icon (Requires a surface)
+        SDL_Surface* iconSurf = IMG_Load("logo.png");
+        if (iconSurf)
+        {
+            SDL_SetWindowIcon(window, iconSurf);
+            SDL_DestroySurface(iconSurf);
+        }
+    }
 
     if (playerTexture)
     {
@@ -130,7 +142,9 @@ void Engine::Run()
     ImGui::DestroyContext();
     delete editorUI;
     editorUI = nullptr;
-    SDL_DestroyTexture(renderTarget);
+    if (renderTarget)  SDL_DestroyTexture(renderTarget);
+    if (playerTexture) SDL_DestroyTexture(playerTexture);
+    if (logoTexture)   SDL_DestroyTexture(logoTexture);
 }
 
 // UPDATE

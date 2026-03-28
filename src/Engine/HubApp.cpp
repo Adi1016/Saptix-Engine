@@ -1,6 +1,7 @@
 #include "HubApp.h"
 #include <iostream>
 #include <vector>
+#include <SDL3_image/SDL_image.h>
 #include <direct.h>   // For _mkdir
 
 // ImGui
@@ -94,6 +95,18 @@ bool HubApp::Init()
     ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
     ImGui_ImplSDLRenderer3_Init(renderer);
 
+    // Load logo
+    logoTexture = IMG_LoadTexture(renderer, "logo.png");
+    if (logoTexture)
+    {
+        SDL_Surface* iconSurf = IMG_Load("logo.png");
+        if (iconSurf)
+        {
+            SDL_SetWindowIcon(window, iconSurf);
+            SDL_DestroySurface(iconSurf);
+        }
+    }
+
     running = true;
     inSplash = true;
     bootTimer = 0.0f;
@@ -157,6 +170,7 @@ void HubApp::Shutdown()
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 
+    if (logoTexture) SDL_DestroyTexture(logoTexture);
     if (renderer) SDL_DestroyRenderer(renderer);
     if (window) SDL_DestroyWindow(window);
     
@@ -203,32 +217,36 @@ void HubApp::RenderSplash()
     dl->AddText(ImVec2(cx - initSize.x/2.0f, topY - initSize.y/2.0f), primaryCol, "S Y S T E M   I N I T I A L I Z E");
     dl->AddLine(ImVec2(cx + 105, topY), ImVec2(cx + 160, topY), IM_COL32(133, 149, 133, 100), 2.0f);
 
-    // 4. Logo Glow & Text "Saptix"
-    ImGui::SetWindowFontScale(3.5f);
-    ImVec2 saptSize = ImGui::CalcTextSize("Sapt");
-    ImVec2 ixSize = ImGui::CalcTextSize("ix");
-    float totalLogoW = saptSize.x + ixSize.x;
-    float textX = cx - totalLogoW / 2.0f;
-    float textY = cy - 70.0f;
+    // 4. Logo Glow & Image
+    float logoSize = 160.0f;
+    float logoX = cx - logoSize / 2.0f;
+    float logoY = cy - 100.0f;
 
-    // Draw multiple shadows to emulate blur
-    ImU32 primaryGlow = IM_COL32(117, 255, 158, 40);
-    ImU32 pinkGlow    = IM_COL32(255, 82, 95, 40);
-    for (float off = 1.0f; off <= 3.0f; off += 1.0f) {
-        dl->AddText(ImVec2(textX - off, textY - off), primaryGlow, "Sapt");
-        dl->AddText(ImVec2(textX + off, textY + off), primaryGlow, "Sapt");
-        dl->AddText(ImVec2(textX + saptSize.x - off, textY - off), pinkGlow, "ix");
-        dl->AddText(ImVec2(textX + saptSize.x + off, textY + off), pinkGlow, "ix");
+    if (logoTexture)
+    {
+        // Glow effect behind logo
+        ImU32 primaryGlow = IM_COL32(117, 255, 158, 40);
+        for (float off = 2.0f; off <= 8.0f; off += 2.0f) {
+            dl->AddRectFilled(ImVec2(logoX - off, logoY - off), ImVec2(logoX + logoSize + off, logoY + logoSize + off), primaryGlow, 8.0f);
+        }
+        dl->AddImage(ImTextureRef{logoTexture}, ImVec2(logoX, logoY), ImVec2(logoX + logoSize, logoY + logoSize));
     }
-    
-    dl->AddText(ImVec2(textX, textY), primaryCol, "Sapt");
-    dl->AddText(ImVec2(textX + saptSize.x, textY), pinkCol, "ix");
-    ImGui::SetWindowFontScale(1.0f);
+    else
+    {
+        // Fallback to text if texture fails
+        ImGui::SetWindowFontScale(3.5f);
+        ImVec2 saptSize = ImGui::CalcTextSize("Sapt");
+        ImVec2 ixSize = ImGui::CalcTextSize("ix");
+        float totalLogoW = saptSize.x + ixSize.x;
+        dl->AddText(ImVec2(cx - totalLogoW / 2.0f, cy - 70.0f), primaryCol, "Sapt");
+        dl->AddText(ImVec2(cx - totalLogoW / 2.0f + saptSize.x, cy - 70.0f), pinkCol, "ix");
+        ImGui::SetWindowFontScale(1.0f);
+    }
 
     // 5. ENGINE Bar
     ImGui::SetWindowFontScale(1.5f);
     ImVec2 engSize = ImGui::CalcTextSize("E N G I N E");
-    float engY = textY + saptSize.y + 10.0f;
+    float engY = logoY + logoSize + 10.0f;
     dl->AddText(ImVec2(cx - engSize.x/2.0f, engY), IM_COL32(229, 226, 225, 255), "E N G I N E");
     dl->AddLine(ImVec2(cx - engSize.x/2.0f - 80.0f, engY + engSize.y/2.0f), ImVec2(cx - engSize.x/2.0f - 15.0f, engY + engSize.y/2.0f), borderCol, 2.0f);
     dl->AddLine(ImVec2(cx + engSize.x/2.0f + 15.0f, engY + engSize.y/2.0f), ImVec2(cx + engSize.x/2.0f + 80.0f, engY + engSize.y/2.0f), borderCol, 2.0f);
@@ -332,6 +350,12 @@ void HubApp::RenderHub()
     ImGui::BeginChild("Sidebar", ImVec2(sidebarW, 0), false, ImGuiWindowFlags_NoScrollbar);
     
     ImGui::Dummy(ImVec2(0, 24)); // top padding
+    if (logoTexture)
+    {
+        ImGui::SetCursorPosX(24);
+        ImGui::Image(ImTextureRef{logoTexture}, ImVec2(64, 64));
+        ImGui::Dummy(ImVec2(0, 12));
+    }
     ImGui::Indent(24);
     
     ImGui::SetWindowFontScale(1.8f);

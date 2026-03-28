@@ -83,6 +83,14 @@ private:
     {
         if (ImGui::BeginMainMenuBar())
         {
+            if (engine->logoTexture)
+            {
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 2);
+                ImGui::Image(ImTextureRef{engine->logoTexture}, ImVec2(18, 18));
+                ImGui::SameLine();
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 2);
+            }
+
             if (ImGui::BeginMenu("File"))
             {
                 if (ImGui::MenuItem("New Scene"))     

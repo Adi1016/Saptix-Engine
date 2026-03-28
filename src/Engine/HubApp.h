@@ -23,6 +23,7 @@ private:
 
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
+    SDL_Texture* logoTexture = nullptr;
     bool running = false;
     
     // Flow State

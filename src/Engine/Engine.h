@@ -23,6 +23,7 @@ public:
     EngineState   state = EngineState::Editor;
     std::string   currentProjectPath = "";
     float         bootTimer = 0.0f;
+    SDL_Texture*  logoTexture = nullptr;
 
 private:
     void Update(float deltaTime);
