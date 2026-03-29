@@ -20,6 +20,14 @@ struct GameObject
     Vector2 velocity;
     bool flipHorizontal = false;
     bool isGrounded = false;
+    bool isEnemy    = false; // Tag: enables EnemyController AI logic
+
+    // ── Health & Damage ─────────────────────────────
+    int   maxHealth          = 100;
+    int   health             = 100;
+    bool  isAlive            = true;
+    float invincibilityTimer = 0.0f;  // Seconds of iframe left after a hit
+    float damageFlashTimer   = 0.0f;  // Brief red flash on hit
     
     // Animation tracking
     int currentFrame = 0;

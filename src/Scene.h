@@ -4,6 +4,8 @@
 #include <SDL3/SDL.h>
 #include "GameObject.h"
 #include "TileMap.h"
+#include "EnemyController.h"
+#include "HealthComponent.h"
 
 class Scene
 {
@@ -33,6 +35,25 @@ public:
         // Move all objects + resolve collisions using split-axis logic
         for (auto& obj : objects)
         {
+            // ── Tick iframe and flash timers ──
+            if (obj.invincibilityTimer > 0.0f) obj.invincibilityTimer -= deltaTime;
+            if (obj.damageFlashTimer   > 0.0f) obj.damageFlashTimer   -= deltaTime;
+
+            // ── Dead player: freeze and skip all further physics ──
+            if (!obj.isAlive && !obj.isEnemy)
+            {
+                obj.velocity = {0, 0};
+                obj.state    = AnimationState::Idle;
+                continue;
+            }
+
+            // Feed scene pointer into any enemy controllers so they can find the player
+            for (auto* comp : obj.components)
+            {
+                if (auto* ec = dynamic_cast<EnemyController*>(comp))
+                    ec->sceneObjects = &objects;
+            }
+
             // 1. apply gravity and run components
             obj.velocity.y += gravity * deltaTime;
             obj.Update(deltaTime); // components set velocity
@@ -183,6 +204,28 @@ public:
             {
                 if (!CheckCollision(objects[i], objects[j])) continue;
 
+                // ── DAMAGE via HealthComponent ────────────────────────────────
+                auto ApplyDamage = [&](GameObject& victim, GameObject& attacker)
+                {
+                    // Find a HealthComponent on the victim
+                    HealthComponent* hc = victim.GetComponent<HealthComponent>();
+                    if (hc)
+                    {
+                        hc->TakeDamage(10);
+                        // Knockback: push victim away from attacker
+                        float kbDir = (victim.position.x < attacker.position.x) ? -1.0f : 1.0f;
+                        victim.velocity.x = kbDir * 350.0f;
+                        victim.velocity.y = -250.0f;
+                    }
+                };
+
+                // Check both directions (i=player j=enemy  OR  i=enemy j=player)
+                if (!objects[i].isEnemy && objects[j].isEnemy)
+                    ApplyDamage(objects[i], objects[j]);
+                else if (objects[i].isEnemy && !objects[j].isEnemy)
+                    ApplyDamage(objects[j], objects[i]);
+
+                // ── Physical pushback (existing elastic resolve) ──────────────
                 float overlapX = std::min(objects[i].position.x + objects[i].size.x,
                                           objects[j].position.x + objects[j].size.x)
                                - std::max(objects[i].position.x, objects[j].position.x);
@@ -299,6 +342,33 @@ public:
                 SDL_RenderFillRect(renderer, &rect);
             }
         }
+
+        // ── HealthComponent bars (world-space, above each entity) ─────────────
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        for (auto& obj : objects)
+        {
+            if (HealthComponent* hc = obj.GetComponent<HealthComponent>())
+                hc->RenderBar(renderer, cameraPos);
+        }
+
+        // ── Game Over overlay — drawn INTO the game viewport texture ──────────
+        if (!objects.empty() && !objects[0].isAlive)
+        {
+            float sw = (float)screenWidth;
+            float sh = (float)screenHeight;
+
+            SDL_SetRenderDrawColor(renderer, 8, 0, 0, 185);
+            SDL_FRect fullScreen = {0, 0, sw, sh};
+            SDL_RenderFillRect(renderer, &fullScreen);
+
+            // Accent separator lines
+            SDL_SetRenderDrawColor(renderer, 255, 50, 50, 140);
+            SDL_FRect topLine = {0, sh * 0.5f - 54, sw, 2};
+            SDL_FRect botLine = {0, sh * 0.5f + 40, sw, 2};
+            SDL_RenderFillRect(renderer, &topLine);
+            SDL_RenderFillRect(renderer, &botLine);
+        }
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
     }
 
 private:
