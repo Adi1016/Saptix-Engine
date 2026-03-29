@@ -1,6 +1,7 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include "imgui.h"
+#include "imgui_internal.h"   // DockBuilder APIs
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
 #include "../Scene.h"
@@ -10,6 +11,8 @@
 #include <vector>
 #include <algorithm>
 #include "../PlayerController.h"
+#include "../EnemyController.h"
+#include "../HealthComponent.h"
 
 class EditorUI
 {
@@ -38,6 +41,10 @@ private:
     float previewTimer = 0.0f;
     int previewFrame = 0;
 
+    // Layout state — rebuilt automatically on resize
+    bool    layoutDirty    = true;    // true = first run, force layout
+    ImVec2  lastDisplaySize = {0, 0};
+
 public:
     void RenderUI(Engine* engine, Scene& scene, SDL_Renderer* renderer, SDL_Texture* gameViewportTex,
                   SDL_Texture* spriteTex, int spriteW, int spriteH)
@@ -45,13 +52,11 @@ public:
         SetupDockspace();
         DrawMainMenuBar(engine, scene, spriteTex);
         DrawHierarchy(scene);
-        DrawGameViewport(gameViewportTex);
+        DrawGameViewport(gameViewportTex, scene);
         DrawProperties(scene);
         
         if (showSpriteEditor && selectedObject && selectedObject->texture)
-        {
             DrawSpriteSheetEditor(spriteTex, spriteW, spriteH);
-        }
     }
 
 private:
@@ -75,8 +80,41 @@ private:
         ImGui::PopStyleVar(3);
 
         ImGuiID dockId = ImGui::GetID("SaptixDock");
-        ImGui::DockSpace(dockId, ImVec2(0,0), ImGuiDockNodeFlags_PassthruCentralNode);
+        ImGui::DockSpace(dockId, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode);
         ImGui::End();
+
+        // Detect first run OR window resize → rebuild the layout
+        ImVec2 cur = ImGui::GetIO().DisplaySize;
+        if (layoutDirty || cur.x != lastDisplaySize.x || cur.y != lastDisplaySize.y)
+        {
+            lastDisplaySize = cur;
+            layoutDirty     = false;
+            RebuildLayout(dockId);
+        }
+    }
+
+    // Programmatic layout: Hierarchy | Game | Properties
+    // Ratios: 20% left  |  ~58% centre  |  22% right
+    void RebuildLayout(ImGuiID dockId)
+    {
+        ImGui::DockBuilderRemoveNode(dockId);
+        ImGui::DockBuilderAddNode(dockId, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dockId, ImGui::GetIO().DisplaySize);
+
+        // Split left panel (Hierarchy)
+        ImGuiID dockLeft, dockRemain;
+        ImGui::DockBuilderSplitNode(dockId, ImGuiDir_Left, 0.20f, &dockLeft, &dockRemain);
+
+        // Split right panel (Properties) from what's left
+        ImGuiID dockRight, dockCenter;
+        ImGui::DockBuilderSplitNode(dockRemain, ImGuiDir_Right, 0.275f, &dockRight, &dockCenter);
+
+        // Assign panels to slots
+        ImGui::DockBuilderDockWindow("Hierarchy",  dockLeft);
+        ImGui::DockBuilderDockWindow("Game",        dockCenter);
+        ImGui::DockBuilderDockWindow("Properties",  dockRight);
+
+        ImGui::DockBuilderFinish(dockId);
     }
 
     void DrawMainMenuBar(Engine* engine, Scene& scene, SDL_Texture* spriteTex)
@@ -242,7 +280,7 @@ private:
         ImGui::End();
     }
 
-    void DrawGameViewport(SDL_Texture* gameViewportTex)
+    void DrawGameViewport(SDL_Texture* gameViewportTex, Scene& scene)
     {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2, 2));
         ImGui::SetNextWindowSize(ImVec2(760, 480), ImGuiCond_FirstUseEver);
@@ -256,9 +294,61 @@ private:
 
         ImVec2 cursor = ImGui::GetCursorScreenPos();
         float  offX   = cursor.x + (avail.x - drawW) * 0.5f;
-        float  offY   = cursor.y + (avail.y - drawH) * 0.5f;
+        float  offY   = cursor.y + (avail.y - drawH) * 0.5f;    
 
-        ImGui::GetWindowDrawList()->AddImage(ImTextureRef{gameViewportTex}, ImVec2(offX, offY), ImVec2(offX + drawW, offY + drawH));
+        ImGui::GetWindowDrawList()->AddImage(
+            ImTextureRef{gameViewportTex},
+            ImVec2(offX, offY), ImVec2(offX + drawW, offY + drawH));
+
+        // ── Game Over overlay — text & button, positioned inside this panel ──
+        if (!scene.objects.empty() && !scene.objects[0].isAlive)
+        {
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            float cx = offX + drawW * 0.5f;
+            float cy = offY + drawH * 0.5f;
+
+            // "GAME OVER" text at 4× font size using the panel's draw list
+            ImFont* font  = ImGui::GetFont();
+            float   bigSz = ImGui::GetFontSize() * 3.5f;
+
+            const char* goText = "GAME OVER";
+            ImVec2 goSz = font->CalcTextSizeA(bigSz, FLT_MAX, 0, goText);
+            ImVec2 goPos = ImVec2(cx - goSz.x * 0.5f, cy - goSz.y * 0.5f - 10);
+
+            // Drop shadow
+            dl->AddText(font, bigSz, ImVec2(goPos.x+2, goPos.y+2), IM_COL32(120,0,0,200), goText);
+            // Main
+            dl->AddText(font, bigSz, goPos, IM_COL32(255, 55, 55, 255), goText);
+
+            // Subtitle
+            const char* sub = "You were defeated.";
+            ImVec2 subSz = ImGui::CalcTextSize(sub);
+            dl->AddText(ImVec2(cx - subSz.x*0.5f, goPos.y + goSz.y + 8),
+                        IM_COL32(200, 180, 180, 180), sub);
+
+            // ── Restart button centred inside the Game panel ──────────────────
+            float btnW = 140.0f, btnH = 36.0f;
+            ImGui::SetCursorScreenPos(ImVec2(cx - btnW*0.5f, goPos.y + goSz.y + 42));
+            ImGui::PushStyleColor(ImGuiCol_Button,        IM_COL32(200, 25, 25, 255));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 55, 55, 255));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  IM_COL32(130,  5,  5, 255));
+            if (ImGui::Button("[ RESTART ]", ImVec2(btnW, btnH)))
+            {
+                GameObject& player = scene.objects[0];
+                // Restart via HealthComponent if present, else reset raw fields
+                if (HealthComponent* hc = player.GetComponent<HealthComponent>())
+                    hc->ResetHealth();
+                else
+                {
+                    player.health             = player.maxHealth;
+                    player.isAlive            = true;
+                    player.invincibilityTimer = 0.0f;
+                    player.damageFlashTimer   = 0.0f;
+                }
+                player.velocity = {0, 0};
+            }
+            ImGui::PopStyleColor(3);
+        }
 
         ImGui::End();
         ImGui::PopStyleVar();
@@ -378,12 +468,73 @@ private:
             if (open)
             {
                 ImGui::Indent();
-                ImGui::TextDisabled("(No exposed properties yet)");
+
+                // ── EnemyController properties ──
+                if (auto* ec = dynamic_cast<EnemyController*>(comp))
+                {
+                    const char* modes[] = { "Patrol", "Chase", "Idle" };
+                    int modeIdx = (int)ec->mode;
+                    ImGui::SetNextItemWidth(130);
+                    if (ImGui::Combo("Mode##ec", &modeIdx, modes, 3))
+                        ec->mode = (EnemyMode)modeIdx;
+                    ImGui::DragFloat("Patrol Speed##ec",    &ec->patrolSpeed,    1.0f, 0.0f,  800.0f);
+                    ImGui::DragFloat("Chase Speed##ec",     &ec->chaseSpeed,     1.0f, 0.0f,  800.0f);
+                    ImGui::DragFloat("Detection Range##ec", &ec->detectionRange, 4.0f, 0.0f, 2000.0f);
+                    ImGui::DragFloat("Patrol Range X##ec",  &ec->patrolRangeX,   4.0f, 0.0f, 2000.0f);
+                    if (ImGui::Button("Reset Spawn Point##ec")) ec->spawnSet = false;
+                }
+                // ── HealthComponent properties ──
+                else if (auto* hc = dynamic_cast<HealthComponent*>(comp))
+                {
+                    // Core values
+                    ImGui::DragInt  ("Max HP##hc",       &selectedObject->maxHealth, 1, 1, 9999);
+                    ImGui::DragInt  ("Current HP##hc",   &selectedObject->health,    1, 0, selectedObject->maxHealth);
+                    ImGui::Checkbox ("Is Alive##hc",     &selectedObject->isAlive);
+                    ImGui::Separator();
+
+                    // Bar visuals
+                    ImGui::Checkbox ("Show Bar##hc",     &hc->showBar);
+                    ImGui::DragFloat("Bar Width##hc",    &hc->barWidth,  1.0f, 10.0f, 400.0f);
+                    ImGui::DragFloat("Bar Height##hc",   &hc->barHeight, 0.5f,  2.0f,  40.0f);
+                    ImGui::DragFloat("Offset Y##hc",     &hc->barOffsetY,1.0f,-200.0f, 0.0f);
+                    ImGui::Separator();
+
+                    // Colour pickers (cast SDL_Color to float[4] for ImGui)
+                    auto EditColor = [](const char* label, SDL_Color& col) {
+                        float c[4] = {col.r/255.f, col.g/255.f, col.b/255.f, col.a/255.f};
+                        if (ImGui::ColorEdit4(label, c, ImGuiColorEditFlags_NoInputs))
+                        { col.r=(Uint8)(c[0]*255); col.g=(Uint8)(c[1]*255);
+                          col.b=(Uint8)(c[2]*255); col.a=(Uint8)(c[3]*255); }
+                    };
+                    EditColor("High HP Color##hc",  hc->colHigh);
+                    EditColor("Mid HP Color##hc",   hc->colMid);
+                    EditColor("Low HP Color##hc",   hc->colLow);
+                    EditColor("Hit Flash Color##hc", hc->colFlash);
+                    EditColor("Track Color##hc",    hc->colTrack);
+                    ImGui::Separator();
+
+                    // I-frame tunables
+                    ImGui::DragFloat("iFrame Duration##hc", &hc->iframeDuration, 0.05f, 0.0f, 5.0f);
+                    ImGui::DragFloat("Flash Duration##hc",  &hc->flashDuration,  0.02f, 0.0f, 2.0f);
+
+                    if (ImGui::Button("Reset Health##hc")) hc->ResetHealth();
+                }
+                else
+                {
+                    ImGui::TextDisabled("(No exposed properties)");
+                }
+
                 ImGui::Unindent();
                 ImGui::Dummy(ImVec2(0, 5));
             }
             ImGui::PopID();
         }
+
+        // ── Is Enemy checkbox (fast tag toggle) ──
+        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::Checkbox("Is Enemy", &selectedObject->isEnemy);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Tag this object as an enemy (used by AI logic).");
 
         ImGui::Dummy(ImVec2(0, 10));
         
@@ -399,9 +550,10 @@ private:
         {
             ImGui::TextDisabled("Available Scripts");
             ImGui::Separator();
+
+            // ─── PlayerController ───────────────────────────────
             if (ImGui::Selectable("PlayerController"))
             {
-                // Verify we don't attach duplicate PlayerControllers
                 bool hasIt = false;
                 for (auto* c : selectedObject->components)
                     if (c->GetName() == "PlayerController") hasIt = true;
@@ -412,6 +564,40 @@ private:
                     selectedObject->components.push_back(pc);
                 }
             }
+
+            // ─── EnemyController ────────────────────────────────
+            if (ImGui::Selectable("EnemyController"))
+            {
+                bool hasIt = false;
+                for (auto* c : selectedObject->components)
+                    if (c->GetName() == "EnemyController") hasIt = true;
+
+                if (!hasIt) {
+                    EnemyController* ec = new EnemyController();
+                    ec->owner = selectedObject;
+                    ec->spawnX = selectedObject->position.x; // pre-seed spawn
+                    ec->spawnSet = true;
+                    selectedObject->isEnemy = true; // auto-tag it
+                    selectedObject->components.push_back(ec);
+                }
+            }
+
+            // ─── HealthComponent ────────────────────────────────
+            if (ImGui::Selectable("HealthComponent"))
+            {
+                bool hasIt = false;
+                for (auto* c : selectedObject->components)
+                    if (c->GetName() == "HealthComponent") hasIt = true;
+
+                if (!hasIt) {
+                    HealthComponent* hc = new HealthComponent();
+                    hc->owner = selectedObject;
+                    // Sync initial bar width to object size
+                    hc->barWidth = std::max(30.0f, selectedObject->size.x * 0.8f);
+                    selectedObject->components.push_back(hc);
+                }
+            }
+
             ImGui::EndPopup();
         }
 
