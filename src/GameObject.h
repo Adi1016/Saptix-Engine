@@ -20,15 +20,9 @@ struct GameObject
     Vector2 velocity;
     bool flipHorizontal = false;
     bool isGrounded = false;
-    bool isEnemy    = false; // Tag: enables EnemyController AI logic
+    bool isEnemy    = false; // Tag: used by systems to differentiate units
+    int  score      = 0;     // To be moved to StatsComponent/PlayerController soon
 
-    // ── Health & Damage ─────────────────────────────
-    int   maxHealth          = 100;
-    int   health             = 100;
-    bool  isAlive            = true;
-    float invincibilityTimer = 0.0f;  // Seconds of iframe left after a hit
-    float damageFlashTimer   = 0.0f;  // Brief red flash on hit
-    
     // Animation tracking
     int currentFrame = 0;
     float animationTimer = 0.0f;
@@ -51,6 +45,17 @@ struct GameObject
         for (auto comp : components)
         {
             T* target = dynamic_cast<T*>(comp);
+            if (target) return target;
+        }
+        return nullptr;
+    }
+
+    template <typename T>
+    const T* GetComponent() const
+    {
+        for (auto comp : components)
+        {
+            const T* target = dynamic_cast<const T*>(comp);
             if (target) return target;
         }
         return nullptr;

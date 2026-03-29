@@ -154,14 +154,15 @@ void Engine::Update(float deltaTime)
 
     if (state != EngineState::Editor) return;
 
-    // Camera follows player
-    if (!scene.objects.empty())
+    // Camera follows player (Generic component-based search)
+    if (GameObject* player = scene.FindObjectWithComponent<PlayerController>())
     {
-        camera.position.x = scene.objects[0].position.x - (scene.screenWidth  / 2.0f);
-        camera.position.y = scene.objects[0].position.y - (scene.screenHeight / 2.0f);
+        camera.position.x = player->position.x - (scene.screenWidth  / 2.0f);
+        camera.position.y = player->position.y - (scene.screenHeight / 2.0f);
     }
 
-    scene.Update(deltaTime);
+    camera.Update(deltaTime);       // Tick screen-shake timer
+    scene.Update(deltaTime, camera); // Scene can call camera.Shake() on hits
 }
 
 // RENDER
@@ -171,15 +172,16 @@ void Engine::Render()
     SDL_SetRenderTarget(renderer, renderTarget);
     SDL_SetRenderDrawColor(renderer, 25, 25, 50, 255);
     SDL_RenderClear(renderer);
-    scene.Render(renderer, camera.position);
+    Vector2 renderCamPos = camera.GetRenderPosition(); // shake-jittered
+    scene.Render(renderer, renderCamPos);
 
     // If editor is open, draw a highlight rect around the selected object
     if (editorMode && editorUI && editorUI->selectedObject)
     {
         GameObject* sel = editorUI->selectedObject;
         SDL_FRect highlightRect = {
-            sel->position.x - camera.position.x - 3,
-            sel->position.y - camera.position.y - 3,
+            sel->position.x - renderCamPos.x - 3,
+            sel->position.y - renderCamPos.y - 3,
             sel->size.x + 6,
             sel->size.y + 6
         };

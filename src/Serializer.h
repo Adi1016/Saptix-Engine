@@ -147,9 +147,21 @@ public:
                         in >> std::ws >> compName;
                         if (compName == "PlayerController")
                         {
-                            PlayerController* player = new PlayerController();
-                            player->owner = &scene.objects.back();
-                            scene.objects.back().components.push_back(player);
+                            PlayerController* pc = new PlayerController();
+                            pc->owner = &scene.objects.back();
+                            scene.objects.back().components.push_back(pc);
+                        }
+                        else if (compName == "HealthComponent")
+                        {
+                            HealthComponent* hc = new HealthComponent();
+                            hc->owner = &scene.objects.back();
+                            scene.objects.back().components.push_back(hc);
+                        }
+                        else if (compName == "CombatComponent")
+                        {
+                            CombatComponent* cc = new CombatComponent();
+                            cc->owner = &scene.objects.back();
+                            scene.objects.back().components.push_back(cc);
                         }
                     }
                 }

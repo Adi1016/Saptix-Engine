@@ -1,9 +1,16 @@
 #pragma once
 #include "Component.h"
 #include "GameObject.h"
+#include "CombatComponent.h"
+#include "HealthComponent.h"
 #include <SDL3/SDL.h>
 #include <cmath>
+#include <string>
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  PlayerController
+//  Specifically manages player input (A/D/Space/J) and animation states.
+// ─────────────────────────────────────────────────────────────────────────────
 class PlayerController : public Component
 {
 public:
@@ -14,45 +21,40 @@ public:
         if (!owner) return;
 
         const bool* keyboard = SDL_GetKeyboardState(NULL);
-        float accel = 800.0f;
+        auto* combat = owner->GetComponent<CombatComponent>();
 
-        // Platformer Jump (Setting velocity directly to create the upward impulse)
-        if (keyboard[SDL_SCANCODE_SPACE] && owner->isGrounded) 
-        {
-            owner->velocity.y = -800.0f; // Jump force
-        }
+        // ── J key — trigger attack (handled by CombatComponent logic) ─────────
+        if (keyboard[SDL_SCANCODE_J] && combat)
+            combat->Attack();
 
-        // Horizontal movement (Lerp / Friction)
+        // ── Platformer Jump ───────────────────────────────────────────────────
+        if (keyboard[SDL_SCANCODE_SPACE] && owner->isGrounded)
+            owner->velocity.y = -800.0f;
+
+        // ── Horizontal movement ───────────────────────────────────────────────
         float targetVelocityX = 0.0f;
         float moveSpeed = 400.0f;
-        
-        if (keyboard[SDL_SCANCODE_A]) 
+
+        if (keyboard[SDL_SCANCODE_A])
         {
-            targetVelocityX = -moveSpeed;
+            targetVelocityX      = -moveSpeed;
             owner->flipHorizontal = true;
         }
-        if (keyboard[SDL_SCANCODE_D]) 
+        if (keyboard[SDL_SCANCODE_D])
         {
-            targetVelocityX = moveSpeed;
+            targetVelocityX      = moveSpeed;
             owner->flipHorizontal = false;
         }
 
-        // Apply Lerp for smooth acceleration and deceleration
         float lerpFactor = 10.0f * deltaTime;
         owner->velocity.x += (targetVelocityX - owner->velocity.x) * lerpFactor;
 
-        // Animation States (Direct State setting for row-based sheet)
+        // ── Animation state ───────────────────────────────────────────────────
         if (!owner->isGrounded)
-        {
             owner->state = AnimationState::Jump;
-        }
-        else if (std::abs(owner->velocity.x) > 20.0f) // Threshold to prevent sliding pixel jitter
-        {
+        else if (std::abs(owner->velocity.x) > 20.0f)
             owner->state = AnimationState::Walk;
-        }
         else
-        {
             owner->state = AnimationState::Idle;
-        }
     }
 };

@@ -6,6 +6,9 @@
 #include "TileMap.h"
 #include "EnemyController.h"
 #include "HealthComponent.h"
+#include "CombatComponent.h"
+#include "Camera.h"
+#include "PlayerController.h"
 
 class Scene
 {
@@ -21,7 +24,28 @@ public:
 
     float gravity = 1500.0f; // Public so editor can tweak it live
 
-    void Update(float deltaTime)
+    // Utility to find the first object with a specific component type
+    template <typename T>
+    GameObject* FindObjectWithComponent()
+    {
+        for (auto& obj : objects)
+        {
+            if (obj.GetComponent<T>()) return &obj;
+        }
+        return nullptr;
+    }
+
+    template <typename T>
+    const GameObject* FindObjectWithComponent() const
+    {
+        for (const auto& obj : objects)
+        {
+            if (obj.GetComponent<T>()) return &obj;
+        }
+        return nullptr;
+    }
+
+    void Update(float deltaTime, Camera& camera)
     {
         // Vector reallocation safety map: Guarantee all components point to their true memory address every frame
         for (auto& obj : objects)
@@ -35,12 +59,10 @@ public:
         // Move all objects + resolve collisions using split-axis logic
         for (auto& obj : objects)
         {
-            // ── Tick iframe and flash timers ──
-            if (obj.invincibilityTimer > 0.0f) obj.invincibilityTimer -= deltaTime;
-            if (obj.damageFlashTimer   > 0.0f) obj.damageFlashTimer   -= deltaTime;
+            auto* health = obj.GetComponent<HealthComponent>();
 
-            // ── Dead player: freeze and skip all further physics ──
-            if (!obj.isAlive && !obj.isEnemy)
+            // ── Dead Unit: freeze and skip all further physics ──
+            if (health && !health->isAlive)
             {
                 obj.velocity = {0, 0};
                 obj.state    = AnimationState::Idle;
@@ -190,11 +212,14 @@ public:
             }
         }
 
-        // Friction -- player (index 0) only
-        if (!objects.empty())
+        // Friction -- apply to any player-controlled object
+        for (auto& obj : objects)
         {
-            objects[0].velocity.x *= 0.98f;
-            objects[0].velocity.y *= 0.98f;
+            if (obj.GetComponent<PlayerController>())
+            {
+                obj.velocity.x *= 0.98f;
+                obj.velocity.y *= 0.98f;
+            }
         }
 
         // AABB collision (elastic, axis-aware)
@@ -204,26 +229,24 @@ public:
             {
                 if (!CheckCollision(objects[i], objects[j])) continue;
 
-                // ── DAMAGE via HealthComponent ────────────────────────────────
+                // ── GENERIC DAMAGE SYSTEM ────────────────────────────────────
                 auto ApplyDamage = [&](GameObject& victim, GameObject& attacker)
                 {
-                    // Find a HealthComponent on the victim
-                    HealthComponent* hc = victim.GetComponent<HealthComponent>();
-                    if (hc)
+                    HealthComponent* vh = victim.GetComponent<HealthComponent>();
+                    if (vh)
                     {
-                        hc->TakeDamage(10);
-                        // Knockback: push victim away from attacker
+                        vh->TakeDamage(10); // Generic contact damage
+                        camera.Shake(6.0f, 0.18f);
                         float kbDir = (victim.position.x < attacker.position.x) ? -1.0f : 1.0f;
                         victim.velocity.x = kbDir * 350.0f;
                         victim.velocity.y = -250.0f;
                     }
                 };
 
-                // Check both directions (i=player j=enemy  OR  i=enemy j=player)
-                if (!objects[i].isEnemy && objects[j].isEnemy)
-                    ApplyDamage(objects[i], objects[j]);
-                else if (objects[i].isEnemy && !objects[j].isEnemy)
+                if (objects[i].isEnemy && !objects[j].isEnemy)
                     ApplyDamage(objects[j], objects[i]);
+                else if (objects[j].isEnemy && !objects[i].isEnemy)
+                    ApplyDamage(objects[i], objects[j]);
 
                 // ── Physical pushback (existing elastic resolve) ──────────────
                 float overlapX = std::min(objects[i].position.x + objects[i].size.x,
@@ -256,6 +279,51 @@ public:
                 }
             }
         }
+
+        // ── GENERIC COMBAT DETECTION ──────────────────────────────────────────
+        for (auto& attacker : objects)
+        {
+            auto* combat = attacker.GetComponent<CombatComponent>();
+            if (!combat || !combat->isAttacking) continue;
+
+            // Project hitbox
+            float hbX = attacker.flipHorizontal 
+                        ? attacker.position.x - combat->attackRange 
+                        : attacker.position.x + attacker.size.x;
+
+            for (auto& target : objects)
+            {
+                if (&attacker == &target) continue;
+                
+                auto* vh = target.GetComponent<HealthComponent>();
+                if (!vh || !vh->isAlive) continue;
+
+                // Simple AABB hit detection
+                bool hitX = hbX < target.position.x + target.size.x && hbX + combat->attackRange > target.position.x;
+                bool hitY = attacker.position.y < target.position.y + target.size.y && attacker.position.y + attacker.size.y > target.position.y;
+
+                if (hitX && hitY)
+                {
+                    vh->TakeDamage(combat->damage);
+                    camera.Shake(10.0f, 0.22f);
+
+                    float kbDir = (target.position.x > attacker.position.x) ? 1.0f : -1.0f;
+                    target.velocity.x = kbDir * 420.0f;
+                    target.velocity.y = -180.0f;
+
+                    if (!vh->isAlive) attacker.score += 100;
+                }
+            }
+        }
+
+        // ── REMOVE DEAD ENEMIES ───────────────────────────────────────────────
+        objects.erase(
+            std::remove_if(objects.begin(), objects.end(),
+                [](const GameObject& o) { 
+                    auto* h = o.GetComponent<HealthComponent>();
+                    return o.isEnemy && h && !h->isAlive; 
+                }),
+            objects.end());
     }
 
     void Render(SDL_Renderer* renderer, const Vector2& cameraPos)
@@ -319,6 +387,20 @@ public:
                 }
                 SDL_FlipMode flip = obj.flipHorizontal ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
 
+                // ── Hit Flash: tint texture red (enemy) or white (player) ──────
+                auto* health = obj.GetComponent<HealthComponent>();
+                if (health && health->damageFlashTimer > 0.0f)
+                {
+                    if (obj.isEnemy)
+                        SDL_SetTextureColorMod(obj.texture, 255, 60, 60);   // red flash
+                    else
+                        SDL_SetTextureColorMod(obj.texture, 255, 255, 255); // white flash
+                }
+                else
+                {
+                    SDL_SetTextureColorMod(obj.texture, 255, 255, 255);     // restore
+                }
+
                 if (activeAnim && !activeAnim->empty())
                 {
                     int fr = obj.currentFrame;
@@ -347,12 +429,42 @@ public:
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         for (auto& obj : objects)
         {
-            if (HealthComponent* hc = obj.GetComponent<HealthComponent>())
+            if (auto* hc = obj.GetComponent<HealthComponent>())
                 hc->RenderBar(renderer, cameraPos);
         }
 
+        // ── Attack hitbox visualisation (shows while swing is active) ─────────
+        for (auto& obj : objects)
+        {
+            auto* combat = obj.GetComponent<CombatComponent>();
+            if (!combat || !combat->isAttacking) continue;
+
+            float hbX = obj.flipHorizontal
+                        ? obj.position.x - combat->attackRange
+                        : obj.position.x + obj.size.x;
+
+            SDL_FRect hbRect = {
+                hbX - cameraPos.x,
+                obj.position.y - cameraPos.y,
+                combat->attackRange,
+                obj.size.y
+            };
+
+            // Pulsing orange fill — alpha proportional to remaining attack time
+            float pulse = std::max(0.0f, combat->attackTimer / combat->attackDuration);
+            SDL_SetRenderDrawColor(renderer, 255, 160, 40, (Uint8)(140 * pulse));
+            SDL_RenderFillRect(renderer, &hbRect);
+
+            // Bright border
+            SDL_SetRenderDrawColor(renderer, 255, 220, 80, (Uint8)(220 * pulse));
+            SDL_RenderRect(renderer, &hbRect);
+        }
+
         // ── Game Over overlay — drawn INTO the game viewport texture ──────────
-        if (!objects.empty() && !objects[0].isAlive)
+        GameObject* player = FindObjectWithComponent<PlayerController>();
+        HealthComponent* ph = player ? player->GetComponent<HealthComponent>() : nullptr;
+        
+        if (ph && !ph->isAlive)
         {
             float sw = (float)screenWidth;
             float sh = (float)screenHeight;

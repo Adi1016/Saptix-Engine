@@ -301,13 +301,15 @@ private:
             ImVec2(offX, offY), ImVec2(offX + drawW, offY + drawH));
 
         // ── Game Over overlay — text & button, positioned inside this panel ──
-        if (!scene.objects.empty() && !scene.objects[0].isAlive)
+        GameObject* playerObj = scene.FindObjectWithComponent<PlayerController>();
+        auto* playerHealth = playerObj ? playerObj->GetComponent<HealthComponent>() : nullptr;
+
+        if (playerHealth && !playerHealth->isAlive)
         {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             float cx = offX + drawW * 0.5f;
             float cy = offY + drawH * 0.5f;
 
-            // "GAME OVER" text at 4× font size using the panel's draw list
             ImFont* font  = ImGui::GetFont();
             float   bigSz = ImGui::GetFontSize() * 3.5f;
 
@@ -315,39 +317,50 @@ private:
             ImVec2 goSz = font->CalcTextSizeA(bigSz, FLT_MAX, 0, goText);
             ImVec2 goPos = ImVec2(cx - goSz.x * 0.5f, cy - goSz.y * 0.5f - 10);
 
-            // Drop shadow
             dl->AddText(font, bigSz, ImVec2(goPos.x+2, goPos.y+2), IM_COL32(120,0,0,200), goText);
-            // Main
             dl->AddText(font, bigSz, goPos, IM_COL32(255, 55, 55, 255), goText);
 
-            // Subtitle
             const char* sub = "You were defeated.";
             ImVec2 subSz = ImGui::CalcTextSize(sub);
             dl->AddText(ImVec2(cx - subSz.x*0.5f, goPos.y + goSz.y + 8),
                         IM_COL32(200, 180, 180, 180), sub);
 
-            // ── Restart button centred inside the Game panel ──────────────────
             float btnW = 140.0f, btnH = 36.0f;
             ImGui::SetCursorScreenPos(ImVec2(cx - btnW*0.5f, goPos.y + goSz.y + 42));
-            ImGui::PushStyleColor(ImGuiCol_Button,        IM_COL32(200, 25, 25, 255));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 55, 55, 255));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  IM_COL32(130,  5,  5, 255));
             if (ImGui::Button("[ RESTART ]", ImVec2(btnW, btnH)))
             {
-                GameObject& player = scene.objects[0];
-                // Restart via HealthComponent if present, else reset raw fields
-                if (HealthComponent* hc = player.GetComponent<HealthComponent>())
-                    hc->ResetHealth();
-                else
-                {
-                    player.health             = player.maxHealth;
-                    player.isAlive            = true;
-                    player.invincibilityTimer = 0.0f;
-                    player.damageFlashTimer   = 0.0f;
-                }
-                player.velocity = {0, 0};
+                playerHealth->ResetHealth();
+                playerObj->velocity = {0, 0};
+                playerObj->score    = 0;
             }
-            ImGui::PopStyleColor(3);
+        }
+
+        // ── PERSISTENT HUD OVERLAY (Health, Score) ────────────────────────────
+        if (playerObj && playerHealth)
+        {
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            float hudX = offX + 15;
+            float hudY = offY + 15;
+
+            // Backing plate
+            dl->AddRectFilled(ImVec2(hudX-5, hudY-5), ImVec2(hudX + 220, hudY + 50), IM_COL32(10, 10, 15, 180), 4.0f);
+            dl->AddRect(ImVec2(hudX-5, hudY-5), ImVec2(hudX + 220, hudY + 50), IM_COL32(80, 80, 100, 120), 4.0f);
+
+            // HP Bar in HUD
+            float hpPct = std::max(0.0f, (float)playerHealth->currentHealth / (float)playerHealth->maxHealth);
+            dl->AddRectFilled(ImVec2(hudX, hudY + 2), ImVec2(hudX + 200, hudY + 12), IM_COL32(30, 30, 40, 255), 2.0f);
+            dl->AddRectFilled(ImVec2(hudX, hudY + 2), ImVec2(hudX + 200 * hpPct, hudY + 12), IM_COL32(255, 50, 50, 255), 2.0f);
+            
+            // Text: HP and Score
+            char hpBuf[32]; snprintf(hpBuf, 32, "HP: %d / %d", playerHealth->currentHealth, playerHealth->maxHealth);
+            dl->AddText(ImVec2(hudX, hudY + 15), IM_COL32(255, 255, 255, 255), hpBuf);
+
+            char scBuf[32]; snprintf(scBuf, 32, "SCORE: %d", playerObj->score);
+            dl->AddText(ImVec2(hudX, hudY + 30), IM_COL32(255, 220, 100, 255), scBuf);
+
+            // I-Frame Badge
+            if (playerHealth->invincibilityTimer > 0.0f)
+                dl->AddText(ImVec2(hudX + 130, hudY + 30), IM_COL32(100, 200, 255, 255), "[INVINCIBLE]");
         }
 
         ImGui::End();
@@ -486,20 +499,17 @@ private:
                 // ── HealthComponent properties ──
                 else if (auto* hc = dynamic_cast<HealthComponent*>(comp))
                 {
-                    // Core values
-                    ImGui::DragInt  ("Max HP##hc",       &selectedObject->maxHealth, 1, 1, 9999);
-                    ImGui::DragInt  ("Current HP##hc",   &selectedObject->health,    1, 0, selectedObject->maxHealth);
-                    ImGui::Checkbox ("Is Alive##hc",     &selectedObject->isAlive);
+                    ImGui::DragInt  ("Max HP##hc",       &hc->maxHealth, 1, 1, 9999);
+                    ImGui::DragInt  ("Current HP##hc",   &hc->currentHealth, 1, 0, hc->maxHealth);
+                    ImGui::Checkbox ("Is Alive##hc",     &hc->isAlive);
                     ImGui::Separator();
 
-                    // Bar visuals
                     ImGui::Checkbox ("Show Bar##hc",     &hc->showBar);
                     ImGui::DragFloat("Bar Width##hc",    &hc->barWidth,  1.0f, 10.0f, 400.0f);
                     ImGui::DragFloat("Bar Height##hc",   &hc->barHeight, 0.5f,  2.0f,  40.0f);
                     ImGui::DragFloat("Offset Y##hc",     &hc->barOffsetY,1.0f,-200.0f, 0.0f);
                     ImGui::Separator();
 
-                    // Colour pickers (cast SDL_Color to float[4] for ImGui)
                     auto EditColor = [](const char* label, SDL_Color& col) {
                         float c[4] = {col.r/255.f, col.g/255.f, col.b/255.f, col.a/255.f};
                         if (ImGui::ColorEdit4(label, c, ImGuiColorEditFlags_NoInputs))
@@ -513,11 +523,22 @@ private:
                     EditColor("Track Color##hc",    hc->colTrack);
                     ImGui::Separator();
 
-                    // I-frame tunables
                     ImGui::DragFloat("iFrame Duration##hc", &hc->iframeDuration, 0.05f, 0.0f, 5.0f);
                     ImGui::DragFloat("Flash Duration##hc",  &hc->flashDuration,  0.02f, 0.0f, 2.0f);
 
                     if (ImGui::Button("Reset Health##hc")) hc->ResetHealth();
+                }
+                // ── CombatComponent properties ──
+                else if (auto* cc = dynamic_cast<CombatComponent*>(comp))
+                {
+                    ImGui::DragInt  ("Damage##cc",       &cc->damage, 1, 0, 999);
+                    ImGui::DragFloat("Range##cc",        &cc->attackRange, 1.0f, 0, 1000.0f);
+                    ImGui::DragFloat("Duration##cc",     &cc->attackDuration, 0.01f, 0.01f, 2.0f);
+                    ImGui::DragFloat("Cooldown##cc",     &cc->attackCooldown, 0.01f, 0.01f, 5.0f);
+                    ImGui::Separator();
+                    ImGui::BeginDisabled();
+                    ImGui::Checkbox("Is Attacking##cc",  &cc->isAttacking);
+                    ImGui::EndDisabled();
                 }
                 else
                 {
@@ -582,13 +603,13 @@ private:
                 }
             }
 
-            // ─── HealthComponent ────────────────────────────────
+            // ─── HealthComponent ─────────────────────────────────
             if (ImGui::Selectable("HealthComponent"))
             {
                 bool hasIt = false;
                 for (auto* c : selectedObject->components)
                     if (c->GetName() == "HealthComponent") hasIt = true;
-
+                
                 if (!hasIt) {
                     HealthComponent* hc = new HealthComponent();
                     hc->owner = selectedObject;
@@ -597,6 +618,22 @@ private:
                     selectedObject->components.push_back(hc);
                 }
             }
+
+            // ─── CombatComponent ─────────────────────────────────
+            if (ImGui::Selectable("CombatComponent"))
+            {
+                bool hasIt = false;
+                for (auto* c : selectedObject->components)
+                    if (c->GetName() == "CombatComponent") hasIt = true;
+                
+                if (!hasIt) {
+                    CombatComponent* cc = new CombatComponent();
+                    cc->owner = selectedObject;
+                    selectedObject->components.push_back(cc);
+                }
+            }
+
+
 
             ImGui::EndPopup();
         }
